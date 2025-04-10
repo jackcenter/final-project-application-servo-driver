@@ -22,7 +22,6 @@ start() {
     fi
 
     if [ -e ${module}.ko ]; then
-        echo "Loading local built file ${module}.ko"
         insmod $module.ko || exit 1
     else
         echo "Local file ${module}.ko not found, attempting to modprobe"
