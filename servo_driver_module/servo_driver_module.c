@@ -1,18 +1,25 @@
 #include <linux/cdev.h>
 #include <linux/fs.h>
+#include <linux/gpio/consumer.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/types.h>
 
 #include "log.h"
 
+#define IO_LED 21
+
+#define IO_OFFSET 0
+
 static int servo_driver_major = 0; // use dynamic major
 static int servo_driver_minor = 0;
 
 static struct cdev servo_driver_cdev;
+static struct gpio_desc *led;
 
 MODULE_AUTHOR("Jack Center");
 MODULE_LICENSE("Dual BSD/GPL");
+MODULE_DESCRIPTION("Example of setting a GPIO pin without the device tree.");
 
 static void servo_driver_exit(void);
 
@@ -46,6 +53,8 @@ static void servo_driver_exit(void) {
 
   dev_t dev = MKDEV(servo_driver_major, servo_driver_minor);
   unregister_chrdev_region(dev, 1);
+
+  gpiod_set_value(led, 0);
 }
 
 static int servo_driver_init(void) {
@@ -71,6 +80,22 @@ static int servo_driver_init(void) {
     unregister_chrdev_region(dev, 1);
     return result;
   }
+
+  led = gpio_to_desc(IO_LED + IO_OFFSET);
+  if (!led) {
+    // TODO: log as error instead of a warning
+    LOG_WARN("gpio_to_desc: error getting pin %d", IO_LED);
+    return -ENODEV;
+  }
+
+  int status = gpiod_direction_output(led, 0);
+  if (status) {
+    // TODO: log as error instead of a warning
+    LOG_WARN("gpiod_direction_output: error setting pin %d to output", IO_LED);
+    return status;
+  }
+
+  gpiod_set_value(led, 1);
 
   return 0;
 }
