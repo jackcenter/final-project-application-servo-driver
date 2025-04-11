@@ -63,7 +63,7 @@ static int servo_driver_init(void) {
 
   int result = alloc_chrdev_region(&dev, servo_driver_minor, 1, "servo_driver");
   if (result < 0) {
-    LOG_WARN("servo_driver failed to allocate a major number");
+    LOG_ERROR("servo_driver failed to allocate a major number");
     return result;
   }
 
@@ -76,26 +76,24 @@ static int servo_driver_init(void) {
 
   result = cdev_add(&servo_driver_cdev, dev, 1);
   if (result < 0) {
-    LOG_WARN("failed to add cdev");
+    LOG_ERROR("failed to add cdev");
     unregister_chrdev_region(dev, 1);
     return result;
   }
 
   led = gpio_to_desc(IO_LED + IO_OFFSET);
   if (!led) {
-    // TODO: log as error instead of a warning
-    LOG_WARN("gpio_to_desc: error getting pin %d", IO_LED);
+    LOG_ERROR("gpio_to_desc: error getting pin %d", IO_LED);
     return -ENODEV;
   }
 
   int status = gpiod_direction_output(led, 0);
   if (status) {
-    // TODO: log as error instead of a warning
-    LOG_WARN("gpiod_direction_output: error setting pin %d to output", IO_LED);
+    LOG_ERROR("gpiod_direction_output: error setting pin %d to output", IO_LED);
     return status;
   }
 
-  gpiod_set_value(led, 1);
+  gpiod_set_value(led, 0);
 
   return 0;
 }
@@ -108,7 +106,26 @@ static int servo_driver_open(struct inode *inode, struct file *file_p) {
 static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
                                  size_t len, loff_t *offset) {
   LOG_DEBUG("servo_driver_read");
-  return 0; 
+  if (*offset > 0) {
+    return 0;
+  }
+
+  int pin_value = gpiod_get_value(led);
+  if (pin_value < 0) {
+    LOG_ERROR("gpiod_get_value returned %d", pin_value);
+    return pin_value;
+  }
+
+  char pin_value_str[16];
+  int pin_value_str_len =
+      snprintf(pin_value_str, sizeof(pin_value_str), "%d\n", pin_value);
+  const size_t bytes_not_written =
+      copy_to_user(buffer, pin_value_str, pin_value_str_len);
+  LOG_DEBUG("copy_to_user returned %lu", bytes_not_written);
+
+  const size_t bytes_written = pin_value_str_len - bytes_not_written;
+  *offset += bytes_written;
+  return bytes_written;
 }
 
 static int servo_driver_release(struct inode *inode, struct file *file_p) {
@@ -120,5 +137,35 @@ static ssize_t servo_driver_write(struct file *file_p,
                                   const char __user *buffer, size_t len,
                                   loff_t *offset) {
   LOG_DEBUG("servo_driver_write");
-  return len;
+  if (*offset > 0) {
+    return 0;
+  }
+
+  char user_str[16];
+  size_t copy_len = min(len, sizeof(user_str) - 1);
+  const size_t retval = copy_from_user(user_str, buffer, copy_len);
+  if (retval != 0) {
+    LOG_ERROR("copy_from_user returned %ld", retval);
+    return -EFAULT;
+  }
+
+  user_str[copy_len] = '\0';
+  *offset += copy_len;
+
+  char *newline_char_p = strchr(user_str, '\n');
+  if (newline_char_p) {
+    *newline_char_p = '\0';
+  }
+
+  if (strcmp(user_str, "0") == 0) {
+    LOG_DEBUG("Write: OFF");
+    gpiod_set_value(led, 0);
+  } else if (strcmp(user_str, "1") == 0) {
+    LOG_DEBUG("Write: ON");
+    gpiod_set_value(led, 1);
+  } else {
+    LOG_WARN("Unknown write command. Acceptable commands are `0` or `1`");
+  }
+
+  return copy_len;
 }
