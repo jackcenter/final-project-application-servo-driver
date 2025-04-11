@@ -42,7 +42,7 @@ write_to_device() {
     if [ $? -ne 0 ]; then
         echo "Error: Failed to write to $device."
         exit 1
-    fi
+    fi 
 }
 
 read_from_device() {
