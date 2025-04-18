@@ -1,8 +1,9 @@
 #include <linux/cdev.h>
 #include <linux/fs.h>
-#include <linux/gpio/consumer.h>
+#include <linux/pwm.h>
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/platform_device.h>
 #include <linux/types.h>
 
 #include "log.h"
@@ -15,11 +16,17 @@ static int servo_driver_major = 0; // use dynamic major
 static int servo_driver_minor = 0;
 
 static struct cdev servo_driver_cdev;
-static struct gpio_desc *led;
+static struct platform_device *pwm_device;
 
 MODULE_AUTHOR("Jack Center");
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_DESCRIPTION("Example of setting a GPIO pin without the device tree.");
+MODULE_DESCRIPTION("Example use the hardware PWM.");
+
+struct pwm_device *pwm0 = NULL;
+u32 pwm_period_ns = 20000000;
+u32 pwm_duty_cycle_ns = 0; 
+
+struct pwm_device *request_rpi_pwm(int chip_index, int pwm_index);
 
 static void servo_driver_exit(void);
 
@@ -49,12 +56,12 @@ struct file_operations servo_driver_fops = {
 static void servo_driver_exit(void) {
   LOG_DEBUG("servo_driver_exit");
 
+  pwm_disable(pwm0);
+
   cdev_del(&servo_driver_cdev);
 
   dev_t dev = MKDEV(servo_driver_major, servo_driver_minor);
   unregister_chrdev_region(dev, 1);
-
-  gpiod_set_value(led, 0);
 }
 
 static int servo_driver_init(void) {
@@ -81,19 +88,18 @@ static int servo_driver_init(void) {
     return result;
   }
 
-  led = gpio_to_desc(IO_LED + IO_OFFSET);
-  if (!led) {
-    LOG_ERROR("gpio_to_desc: error getting pin %d", IO_LED);
-    return -ENODEV;
-  }
+  pwm_device = platform_device_register_simple("my_pwm_device", -1, NULL, 0);
+  pwm0 = devm_pwm_get(&pwm_device->dev, "pwm0");  // pwmchip0, pwm0
+  if (IS_ERR(pwm0)) {
+    LOG_ERROR("Could not get PWM0");
+    platform_device_unregister(pwm_device);
+    cdev_del(&servo_driver_cdev);
+    unregister_chrdev_region(dev, 1);
+    return PTR_ERR(pwm0);
+}  
 
-  int status = gpiod_direction_output(led, 0);
-  if (status) {
-    LOG_ERROR("gpiod_direction_output: error setting pin %d to output", IO_LED);
-    return status;
-  }
-
-  gpiod_set_value(led, 0);
+   pwm_config(pwm0, pwm_duty_cycle_ns, pwm_period_ns);
+   pwm_enable(pwm0);
 
   return 0;
 }
@@ -110,15 +116,9 @@ static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
     return 0;
   }
 
-  int pin_value = gpiod_get_value(led);
-  if (pin_value < 0) {
-    LOG_ERROR("gpiod_get_value returned %d", pin_value);
-    return pin_value;
-  }
-
   char pin_value_str[16];
   int pin_value_str_len =
-      snprintf(pin_value_str, sizeof(pin_value_str), "%d\n", pin_value);
+      snprintf(pin_value_str, sizeof(pin_value_str), "%u\n", pwm_duty_cycle_ns);
   const size_t bytes_not_written =
       copy_to_user(buffer, pin_value_str, pin_value_str_len);
   LOG_DEBUG("copy_to_user returned %lu", bytes_not_written);
@@ -159,13 +159,15 @@ static ssize_t servo_driver_write(struct file *file_p,
 
   if (strcmp(user_str, "0") == 0) {
     LOG_DEBUG("Write: OFF");
-    gpiod_set_value(led, 0);
+    pwm_duty_cycle_ns = 0;
   } else if (strcmp(user_str, "1") == 0) {
     LOG_DEBUG("Write: ON");
-    gpiod_set_value(led, 1);
+    pwm_duty_cycle_ns = 5000000;
   } else {
     LOG_WARN("Unknown write command. Acceptable commands are `0` or `1`");
   }
+
+  pwm_config(pwm0, pwm_duty_cycle_ns, pwm_period_ns);
 
   return copy_len;
 }
