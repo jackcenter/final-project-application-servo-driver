@@ -3,12 +3,6 @@ argument="$1"
 module=servo_driver_module
 device=servo_driver
 
-if ! [ $# -eq 1 ]
-then
-    echo "Usage: servo_driver_start_stop.sh {start|stop|restart|status}"
-    exit 1
-fi
-
 # Loads the module
 start() {
     mode="666"
@@ -59,6 +53,13 @@ status() {
     fi
 }
 
+
+if ! [ $# -eq 1 ]
+then
+    echo "Usage: servo_driver_init.sh {start|stop|restart|status}"
+    exit 1
+fi
+
 cd $(dirname $0)/..
 case "$argument" in
     start)
@@ -74,7 +75,7 @@ case "$argument" in
         status
         ;;
     *)
-        echo "Usage: servo_driver_start_stop.sh {start|stop}"
+        echo "Usage: servo_driver_init.sh {start|stop|restart|status}"
         exit 1
         ;;
 esac
