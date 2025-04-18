@@ -91,18 +91,10 @@ static int servo_driver_init(void) {
     return result;
   }
 
-  pwm_dummy_dev = platform_device_register_simple("my_pwm_dummy", -1, NULL, 0);
-  if (IS_ERR(pwm_dummy_dev)) {
-    pr_err("Failed to register dummy platform device\n");
-    platform_device_unregister(pwm_dummy_dev);
-    unregister_chrdev_region(dev, 1);
-    return PTR_ERR(pwm_dummy_dev);
-  }
-
-  pwm = pwm_get(&pwm_dummy_dev->dev, "pwm0");
+  pwm = pwm_get(NULL, "pwm0");
   if (IS_ERR(pwm)) {
-    pr_err("Failed to get PWM device\n");
-    platform_device_unregister(pwm_dummy_dev);
+    LOG_ERROR("Failed to get PWM device");
+    cdev_del(&servo_driver_cdev);
     unregister_chrdev_region(dev, 1);
     return PTR_ERR(pwm);
   }
