@@ -1,9 +1,9 @@
 #include <linux/cdev.h>
 #include <linux/fs.h>
-#include <linux/pwm.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/pwm.h>
 #include <linux/types.h>
 
 #include "log.h"
@@ -16,7 +16,10 @@ static int servo_driver_major = 0; // use dynamic major
 static int servo_driver_minor = 0;
 
 static struct cdev servo_driver_cdev;
-static struct platform_device *pwm_device;
+
+static struct pwm_device *pwm;
+static struct pwm_state state;
+struct platform_device *pwm_dummy_dev;
 
 MODULE_AUTHOR("Jack Center");
 MODULE_LICENSE("Dual BSD/GPL");
@@ -24,7 +27,7 @@ MODULE_DESCRIPTION("Example use the hardware PWM.");
 
 struct pwm_device *pwm0 = NULL;
 u32 pwm_period_ns = 20000000;
-u32 pwm_duty_cycle_ns = 0; 
+u32 pwm_duty_cycle_ns = 0;
 
 struct pwm_device *request_rpi_pwm(int chip_index, int pwm_index);
 
@@ -57,7 +60,7 @@ static void servo_driver_exit(void) {
   LOG_DEBUG("servo_driver_exit");
 
   pwm_disable(pwm0);
-
+  platform_device_unregister(pwm_dummy_dev);
   cdev_del(&servo_driver_cdev);
 
   dev_t dev = MKDEV(servo_driver_major, servo_driver_minor);
@@ -88,18 +91,27 @@ static int servo_driver_init(void) {
     return result;
   }
 
-  pwm_device = platform_device_register_simple("my_pwm_device", -1, NULL, 0);
-  pwm0 = devm_pwm_get(&pwm_device->dev, "pwm0");  // pwmchip0, pwm0
-  if (IS_ERR(pwm0)) {
-    LOG_ERROR("Could not get PWM0");
-    platform_device_unregister(pwm_device);
-    cdev_del(&servo_driver_cdev);
+  pwm_dummy_dev = platform_device_register_simple("my_pwm_dummy", -1, NULL, 0);
+  if (IS_ERR(pwm_dummy_dev)) {
+    pr_err("Failed to register dummy platform device\n");
+    platform_device_unregister(pwm_dummy_dev);
     unregister_chrdev_region(dev, 1);
-    return PTR_ERR(pwm0);
-}  
+    return PTR_ERR(pwm_dummy_dev);
+  }
 
-   pwm_config(pwm0, pwm_duty_cycle_ns, pwm_period_ns);
-   pwm_enable(pwm0);
+  pwm = pwm_get(&pwm_dummy_dev->dev, "pwm0");
+  if (IS_ERR(pwm)) {
+    pr_err("Failed to get PWM device\n");
+    platform_device_unregister(pwm_dummy_dev);
+    unregister_chrdev_region(dev, 1);
+    return PTR_ERR(pwm);
+  }
+
+  pwm_get_state(pwm, &state);
+  state.period = 20000000;
+  state.duty_cycle = 1500000;
+  state.enabled = true;
+  pwm_apply_state(pwm, &state);
 
   return 0;
 }
