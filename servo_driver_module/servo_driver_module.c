@@ -91,9 +91,17 @@ static int servo_driver_init(void) {
     return result;
   }
 
-  pwm = pwm_get(NULL, "pwm0");
+  // Get the PWM device associated with pwmchip0 (if pwmchip0 exists)
+  struct platform_device *pdev = platform_device_register_simple("pwm", -1, NULL, 0);
+  if (IS_ERR(pdev)) {
+      LOG_ERROR("Failed to register platform device\n");
+      return PTR_ERR(pdev);
+  }
+
+  pwm = pwm_get(&pdev->dev, "pwm0");
   if (IS_ERR(pwm)) {
     LOG_ERROR("Failed to get PWM device");
+    platform_device_unregister(pdev);
     cdev_del(&servo_driver_cdev);
     unregister_chrdev_region(dev, 1);
     return PTR_ERR(pwm);
