@@ -3,183 +3,153 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/of_device.h>
 #include <linux/pwm.h>
-#include <linux/types.h>
+#include <linux/uaccess.h>
 
 #include "log.h"
 
-#define IO_LED 21
-
-#define IO_OFFSET 0
-
-static int servo_driver_major = 0; // use dynamic major
-static int servo_driver_minor = 0;
-
-static struct cdev servo_driver_cdev;
-
-static struct pwm_device *pwm;
-static struct pwm_state state;
-struct platform_device *pwm_dummy_dev;
-
 MODULE_AUTHOR("Jack Center");
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_DESCRIPTION("Example use the hardware PWM.");
+MODULE_DESCRIPTION("Example use of hardware PWM with platform driver.");
 
-struct pwm_device *pwm0 = NULL;
-u32 pwm_period_ns = 20000000;
-u32 pwm_duty_cycle_ns = 0;
+#define DEVICE_NAME "servo_driver"
 
-struct pwm_device *request_rpi_pwm(int chip_index, int pwm_index);
-
-static void servo_driver_exit(void);
-
-static int servo_driver_init(void);
+static struct pwm_device *pwm0;
+static u32 pwm_period_ns = 20000000;
+static u32 pwm_duty_cycle_ns = 1500000;
 
 static int servo_driver_open(struct inode *inode, struct file *file_p);
-
-static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
-                                 size_t len, loff_t *offset);
-
 static int servo_driver_release(struct inode *inode, struct file *file_p);
+static ssize_t servo_driver_read(struct file *file_p, char __user *buffer, size_t len, loff_t *offset);
+static ssize_t servo_driver_write(struct file *file_p, const char __user *buffer, size_t len, loff_t *offset);
 
-static ssize_t servo_driver_write(struct file *file_p,
-                                  const char __user *buffer, size_t len,
-                                  loff_t *offset);
+static int major_number;
+static struct cdev servo_cdev;
 
-module_init(servo_driver_init);
-module_exit(servo_driver_exit);
-
-struct file_operations servo_driver_fops = {
+static const struct file_operations servo_driver_fops = {
+    .owner = THIS_MODULE,
     .open = servo_driver_open,
     .read = servo_driver_read,
     .release = servo_driver_release,
     .write = servo_driver_write,
 };
 
-static void servo_driver_exit(void) {
-  LOG_DEBUG("servo_driver_exit");
+static int my_pwm_probe(struct platform_device *pdev)
+{
+    dev_t dev;
+    int result;
 
-  pwm_disable(pwm0);
-  platform_device_unregister(pwm_dummy_dev);
-  cdev_del(&servo_driver_cdev);
+    LOG_DEBUG("my_pwm_probe");
 
-  dev_t dev = MKDEV(servo_driver_major, servo_driver_minor);
-  unregister_chrdev_region(dev, 1);
-}
+    result = alloc_chrdev_region(&dev, 0, 1, DEVICE_NAME);
+    if (result < 0) {
+        LOG_ERROR("Failed to allocate char device region");
+        return result;
+    }
 
-static int servo_driver_init(void) {
-  LOG_DEBUG("servo_driver_init");
-  dev_t dev = 0;
+    major_number = MAJOR(dev);
 
-  int result = alloc_chrdev_region(&dev, servo_driver_minor, 1, "servo_driver");
-  if (result < 0) {
-    LOG_ERROR("servo_driver failed to allocate a major number");
-    return result;
-  }
+    cdev_init(&servo_cdev, &servo_driver_fops);
+    result = cdev_add(&servo_cdev, dev, 1);
+    if (result < 0) {
+        LOG_ERROR("Failed to add cdev");
+        unregister_chrdev_region(dev, 1);
+        return result;
+    }
 
-  servo_driver_major = MAJOR(dev);
-  LOG_DEBUG("servo_driver registered with major number %d", servo_driver_major);
+    pwm0 = devm_get_pwm(&pdev->dev, "pwm0");
+    if (IS_ERR(pwm0)) {
+        LOG_ERROR("Failed to get PWM device");
+        cdev_del(&servo_cdev);
+        unregister_chrdev_region(dev, 1);
+        return PTR_ERR(pwm0);
+    }
 
-  cdev_init(&servo_driver_cdev, &servo_driver_fops);
-  servo_driver_cdev.owner = THIS_MODULE;
-  servo_driver_cdev.ops = &servo_driver_fops;
+    pwm_config(pwm0, pwm_duty_cycle_ns, pwm_period_ns);
+    pwm_enable(pwm0);
 
-  result = cdev_add(&servo_driver_cdev, dev, 1);
-  if (result < 0) {
-    LOG_ERROR("failed to add cdev");
-    unregister_chrdev_region(dev, 1);
-    return result;
-  }
-
-  // Get the PWM device associated with pwmchip0 (if pwmchip0 exists)
-  struct platform_device *pdev = platform_device_register_simple("pwm", -1, NULL, 0);
-  if (IS_ERR(pdev)) {
-      LOG_ERROR("Failed to register platform device\n");
-      return PTR_ERR(pdev);
-  }
-
-  pwm = pwm_get(&pdev->dev, "pwm0");
-  if (IS_ERR(pwm)) {
-    LOG_ERROR("Failed to get PWM device");
-    platform_device_unregister(pdev);
-    cdev_del(&servo_driver_cdev);
-    unregister_chrdev_region(dev, 1);
-    return PTR_ERR(pwm);
-  }
-
-  pwm_get_state(pwm, &state);
-  state.period = 20000000;
-  state.duty_cycle = 1500000;
-  state.enabled = true;
-  pwm_apply_state(pwm, &state);
-
-  return 0;
-}
-
-static int servo_driver_open(struct inode *inode, struct file *file_p) {
-  LOG_DEBUG("servo_driver_open");
-  return 0;
-}
-
-static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
-                                 size_t len, loff_t *offset) {
-  LOG_DEBUG("servo_driver_read");
-  if (*offset > 0) {
     return 0;
-  }
-
-  char pin_value_str[16];
-  int pin_value_str_len =
-      snprintf(pin_value_str, sizeof(pin_value_str), "%u\n", pwm_duty_cycle_ns);
-  const size_t bytes_not_written =
-      copy_to_user(buffer, pin_value_str, pin_value_str_len);
-  LOG_DEBUG("copy_to_user returned %lu", bytes_not_written);
-
-  const size_t bytes_written = pin_value_str_len - bytes_not_written;
-  *offset += bytes_written;
-  return bytes_written;
 }
 
-static int servo_driver_release(struct inode *inode, struct file *file_p) {
-  LOG_DEBUG("servo_driver_release");
-  return 0;
-}
+static int my_pwm_remove(struct platform_device *pdev)
+{
+    dev_t dev = MKDEV(major_number, 0);
 
-static ssize_t servo_driver_write(struct file *file_p,
-                                  const char __user *buffer, size_t len,
-                                  loff_t *offset) {
-  LOG_DEBUG("servo_driver_write");
-  if (*offset > 0) {
+    LOG_DEBUG("my_pwm_remove");
+    pwm_disable(pwm0);
+    cdev_del(&servo_cdev);
+    unregister_chrdev_region(dev, 1);
+
     return 0;
-  }
+}
 
-  char user_str[16];
-  size_t copy_len = min(len, sizeof(user_str) - 1);
-  const size_t retval = copy_from_user(user_str, buffer, copy_len);
-  if (retval != 0) {
-    LOG_ERROR("copy_from_user returned %ld", retval);
-    return -EFAULT;
-  }
+static const struct of_device_id my_pwm_dt_ids[] = {
+    { .compatible = "mycompany,my-pwm-device" },
+    { /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, my_pwm_dt_ids);
 
-  user_str[copy_len] = '\0';
-  *offset += copy_len;
+static struct platform_driver my_pwm_driver = {
+    .probe = my_pwm_probe,
+    .remove = my_pwm_remove,
+    .driver = {
+        .name = DEVICE_NAME,
+        .of_match_table = my_pwm_dt_ids,
+    },
+};
 
-  char *newline_char_p = strchr(user_str, '\n');
-  if (newline_char_p) {
-    *newline_char_p = '\0';
-  }
+module_platform_driver(my_pwm_driver);
 
-  if (strcmp(user_str, "0") == 0) {
-    LOG_DEBUG("Write: OFF");
-    pwm_duty_cycle_ns = 0;
-  } else if (strcmp(user_str, "1") == 0) {
-    LOG_DEBUG("Write: ON");
-    pwm_duty_cycle_ns = 5000000;
-  } else {
-    LOG_WARN("Unknown write command. Acceptable commands are `0` or `1`");
-  }
+static int servo_driver_open(struct inode *inode, struct file *file_p)
+{
+    LOG_DEBUG("servo_driver_open");
+    return 0;
+}
 
-  pwm_config(pwm0, pwm_duty_cycle_ns, pwm_period_ns);
+static int servo_driver_release(struct inode *inode, struct file *file_p)
+{
+    LOG_DEBUG("servo_driver_release");
+    return 0;
+}
 
-  return copy_len;
+static ssize_t servo_driver_read(struct file *file_p, char __user *buffer, size_t len, loff_t *offset)
+{
+    char buf[16];
+    int len_written;
+
+    if (*offset > 0)
+        return 0;
+
+    len_written = snprintf(buf, sizeof(buf), "%u\n", pwm_duty_cycle_ns);
+    if (copy_to_user(buffer, buf, len_written))
+        return -EFAULT;
+
+    *offset += len_written;
+    return len_written;
+}
+
+static ssize_t servo_driver_write(struct file *file_p, const char __user *buffer, size_t len, loff_t *offset)
+{
+    char buf[16];
+
+    if (len >= sizeof(buf))
+        return -EINVAL;
+
+    if (copy_from_user(buf, buffer, len))
+        return -EFAULT;
+
+    buf[len] = '\0';
+
+    if (strncmp(buf, "0", 1) == 0) {
+        pwm_duty_cycle_ns = 0;
+    } else if (strncmp(buf, "1", 1) == 0) {
+        pwm_duty_cycle_ns = 5000000;
+    } else {
+        LOG_WARN("Unknown write value");
+        return -EINVAL;
+    }
+
+    pwm_config(pwm0, pwm_duty_cycle_ns, pwm_period_ns);
+    return len;
 }
