@@ -1,10 +1,13 @@
 #include <ctype.h>
+#include <fcntl.h>
+#include <linux/ioctl.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
-#include <string.h>
-#include <fcntl.h>
+
+#include "servo_ioctl.h"
 
 int main() {
   struct termios oldt, newt;
@@ -39,9 +42,15 @@ int main() {
             switch (seq[2]) {
             case 'A':
               printf("Up Arrow (pressed)\n");
+              if (ioctl(fd, SERVO_ENABLE) < 0) {
+                perror("ioctl");
+              }
               break;
             case 'B':
               printf("Down Arrow (pressed)\n");
+              if (ioctl(fd, SERVO_DISABLE) < 0) {
+                perror("ioctl");
+              }
               break;
             case 'C': {
               printf("Right Arrow (pressed)\n");
