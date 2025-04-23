@@ -102,7 +102,6 @@ int pwm_probe(struct platform_device *pdev) {
   }
 
   pwm_config(pwm0, pwm_duty_cycle_ns, pwm_period_ns);
-  pwm_enable(pwm0);
 
   return 0;
 }

@@ -10,7 +10,7 @@ OBJS := $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)	# make object files for all c fi
 
 CC ?= $(CROSS_COMPILE)gcc
 LDFLAGS ?=
-CFLAGS ?= -g -Wall -Werror -O0 -I$(INC_DIR)
+CFLAGS ?= -g -Wall -Werror -O0 -I$(INC_DIR) -I../servo_driver_module/include
 
 all: $(TGT_DIR)/$(TARGET)
 
