@@ -11,14 +11,20 @@
 
 MODULE_AUTHOR("Jack Center");
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_DESCRIPTION("Example use of hardware PWM with platform driver.");
+MODULE_DESCRIPTION("Creates a character driver for controlling a servo");
 
 #define DEVICE_NAME "servo_driver"
 
+static int major_number;
+static struct cdev servo_cdev;
+
 static struct pwm_device *pwm0;
+
 static u32 pwm_period_ns = 20000000;
 static u32 pwm_duty_cycle_ns = 1500000;
 
+static int pwm_probe(struct platform_device *pdev);
+static int pwm_remove(struct platform_device *pdev);
 static int servo_driver_open(struct inode *inode, struct file *file_p);
 static int servo_driver_release(struct inode *inode, struct file *file_p);
 static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
@@ -27,8 +33,24 @@ static ssize_t servo_driver_write(struct file *file_p,
                                   const char __user *buffer, size_t len,
                                   loff_t *offset);
 
-static int major_number;
-static struct cdev servo_cdev;
+static int clamp_value(const int val, const int min, const int max);
+
+static int map_value(const int val, const int in_min, const int in_max,
+                     const int out_min, const int out_max);
+
+static const struct of_device_id pwm_dt_ids[] = {
+    {.compatible = "mycompany,my-pwm-device"}, {}}; // From device tree property
+MODULE_DEVICE_TABLE(of, pwm_dt_ids);                // Matches driver to device
+
+static struct platform_driver pwm_driver = {
+    .probe = pwm_probe,
+    .remove = pwm_remove,
+    .driver =
+        {
+            .name = DEVICE_NAME,
+            .of_match_table = pwm_dt_ids,
+        },
+};
 
 static const struct file_operations servo_driver_fops = {
     .owner = THIS_MODULE,
@@ -38,11 +60,13 @@ static const struct file_operations servo_driver_fops = {
     .write = servo_driver_write,
 };
 
-static int my_pwm_probe(struct platform_device *pdev) {
+module_platform_driver(pwm_driver); // Handles init and exit
+
+int pwm_probe(struct platform_device *pdev) {
   dev_t dev;
   int result;
 
-  LOG_DEBUG("my_pwm_probe");
+  LOG_DEBUG("pwm_probe");
 
   result = alloc_chrdev_region(&dev, 0, 1, DEVICE_NAME);
   if (result < 0) {
@@ -77,32 +101,16 @@ static int my_pwm_probe(struct platform_device *pdev) {
   return 0;
 }
 
-static int my_pwm_remove(struct platform_device *pdev) {
+int pwm_remove(struct platform_device *pdev) {
   dev_t dev = MKDEV(major_number, 0);
 
-  LOG_DEBUG("my_pwm_remove");
+  LOG_DEBUG("pwm_remove");
   pwm_disable(pwm0);
   cdev_del(&servo_cdev);
   unregister_chrdev_region(dev, 1);
 
   return 0;
 }
-
-static const struct of_device_id my_pwm_dt_ids[] = {
-    {.compatible = "mycompany,my-pwm-device"}, {/* sentinel */}};
-MODULE_DEVICE_TABLE(of, my_pwm_dt_ids);
-
-static struct platform_driver my_pwm_driver = {
-    .probe = my_pwm_probe,
-    .remove = my_pwm_remove,
-    .driver =
-        {
-            .name = DEVICE_NAME,
-            .of_match_table = my_pwm_dt_ids,
-        },
-};
-
-module_platform_driver(my_pwm_driver);
 
 static int servo_driver_open(struct inode *inode, struct file *file_p) {
   LOG_DEBUG("servo_driver_open");
@@ -141,17 +149,56 @@ static ssize_t servo_driver_write(struct file *file_p,
   if (copy_from_user(buf, buffer, len))
     return -EFAULT;
 
-  buf[len] = '\0';
+  buf[len] = '\0'; // make the input a string
 
-  if (strncmp(buf, "0", 1) == 0) {
-    pwm_duty_cycle_ns = 0;
-  } else if (strncmp(buf, "1", 1) == 0) {
-    pwm_duty_cycle_ns = 5000000;
-  } else {
-    LOG_WARN("Unknown write value");
+  int val;
+  int retval = kstrtoint(buf, 10, &val);
+  if (retval) {
+    LOG_ERROR("kstrtoint (%d)", retval);
     return -EINVAL;
   }
 
+  // check range: should go in a config
+  if (val < 0 || val > 180) {
+    LOG_ERROR("servo command (%d) is out of range [%d, %d]", val, 0, 180);
+    return -EINVAL;
+  }
+
+  // covert to pwm
+  int pwm_duty_cycle_ns = map_value(val, 0, 180, 470000, 2300000);
+
+  // write to pwm
   pwm_config(pwm0, pwm_duty_cycle_ns, pwm_period_ns);
   return len;
+}
+
+int clamp_value(const int val, const int min, const int max) {
+  if (val < min) {
+    return min;
+  }
+
+  if (val > max) {
+    return max;
+  }
+
+  return val;
+}
+
+int map_value(const int val, const int in_min, const int in_max,
+              const int out_min, const int out_max) {
+  if (in_min == in_max) {
+    LOG_WARN("Input range [%d, %d] is zero width. Returning minimum value from "
+             "output range.",
+             in_min, in_max);
+    return out_min;
+  }
+
+  int clamped_val = clamp_value(val, in_min, in_max);
+  if (clamped_val != val) {
+    LOG_WARN("Mapped value (%d) was clamped to range [%d, %d].", val, in_min,
+             in_max);
+  }
+
+  return (clamped_val - in_min) * (out_max - out_min) / (in_max - in_min) +
+         out_min;
 }
