@@ -1,99 +1,119 @@
 #include <linux/cdev.h>
 #include <linux/fs.h>
-#include <linux/gpio/consumer.h>
 #include <linux/init.h>
 #include <linux/module.h>
-#include <linux/types.h>
+#include <linux/of_device.h>
+#include <linux/platform_device.h>
+#include <linux/pwm.h>
+#include <linux/uaccess.h>
 
 #include "log.h"
-
-#define IO_LED 21
-
-#define IO_OFFSET 0
-
-static int servo_driver_major = 0; // use dynamic major
-static int servo_driver_minor = 0;
-
-static struct cdev servo_driver_cdev;
-static struct gpio_desc *led;
+#include "servo_ioctl.h"
 
 MODULE_AUTHOR("Jack Center");
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_DESCRIPTION("Example of setting a GPIO pin without the device tree.");
+MODULE_DESCRIPTION("Creates a character driver for controlling a servo");
 
-static void servo_driver_exit(void);
+#define DEVICE_NAME "servo_driver"
 
-static int servo_driver_init(void);
+static int major_number;
+static struct cdev servo_cdev;
 
+static struct pwm_device *pwm0;
+
+static u32 pwm_period_ns = 20000000;
+static u32 pwm_duty_cycle_ns = 1500000;
+
+static int pwm_probe(struct platform_device *pdev);
+static int pwm_remove(struct platform_device *pdev);
+static long servo_driver_ioctl(struct file *file_p, unsigned int cmd,
+                               unsigned long arg);
 static int servo_driver_open(struct inode *inode, struct file *file_p);
-
+static int servo_driver_release(struct inode *inode, struct file *file_p);
 static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
                                  size_t len, loff_t *offset);
-
-static int servo_driver_release(struct inode *inode, struct file *file_p);
-
 static ssize_t servo_driver_write(struct file *file_p,
                                   const char __user *buffer, size_t len,
                                   loff_t *offset);
 
-module_init(servo_driver_init);
-module_exit(servo_driver_exit);
+static int clamp_value(const int val, const int min, const int max);
 
-struct file_operations servo_driver_fops = {
+static int map_value(const int val, const int in_min, const int in_max,
+                     const int out_min, const int out_max);
+
+static const struct of_device_id pwm_dt_ids[] = {
+    {.compatible = "mycompany,my-pwm-device"}, {}}; // From device tree property
+MODULE_DEVICE_TABLE(of, pwm_dt_ids);                // Matches driver to device
+
+static struct platform_driver pwm_driver = {
+    .probe = pwm_probe,
+    .remove = pwm_remove,
+    .driver =
+        {
+            .name = DEVICE_NAME,
+            .of_match_table = pwm_dt_ids,
+        },
+};
+
+static const struct file_operations servo_driver_fops = {
+    .owner = THIS_MODULE,
     .open = servo_driver_open,
     .read = servo_driver_read,
     .release = servo_driver_release,
     .write = servo_driver_write,
+    .unlocked_ioctl = servo_driver_ioctl,
 };
 
-static void servo_driver_exit(void) {
-  LOG_DEBUG("servo_driver_exit");
+module_platform_driver(pwm_driver); // Handles init and exit
 
-  cdev_del(&servo_driver_cdev);
+int pwm_probe(struct platform_device *pdev) {
+  dev_t dev;
+  int result;
 
-  dev_t dev = MKDEV(servo_driver_major, servo_driver_minor);
-  unregister_chrdev_region(dev, 1);
+  LOG_DEBUG("pwm_probe");
 
-  gpiod_set_value(led, 0);
-}
-
-static int servo_driver_init(void) {
-  LOG_DEBUG("servo_driver_init");
-  dev_t dev = 0;
-
-  int result = alloc_chrdev_region(&dev, servo_driver_minor, 1, "servo_driver");
+  result = alloc_chrdev_region(&dev, 0, 1, DEVICE_NAME);
   if (result < 0) {
-    LOG_ERROR("servo_driver failed to allocate a major number");
+    LOG_ERROR("Failed to allocate char device region");
     return result;
   }
 
-  servo_driver_major = MAJOR(dev);
-  LOG_DEBUG("servo_driver registered with major number %d", servo_driver_major);
+  major_number = MAJOR(dev);
 
-  cdev_init(&servo_driver_cdev, &servo_driver_fops);
-  servo_driver_cdev.owner = THIS_MODULE;
-  servo_driver_cdev.ops = &servo_driver_fops;
-
-  result = cdev_add(&servo_driver_cdev, dev, 1);
+  cdev_init(&servo_cdev, &servo_driver_fops);
+  result = cdev_add(&servo_cdev, dev, 1);
   if (result < 0) {
-    LOG_ERROR("failed to add cdev");
+    LOG_ERROR("Failed to add cdev");
     unregister_chrdev_region(dev, 1);
     return result;
   }
 
-  led = gpio_to_desc(IO_LED + IO_OFFSET);
-  if (!led) {
-    LOG_ERROR("gpio_to_desc: error getting pin %d", IO_LED);
-    return -ENODEV;
+  pwm0 = devm_pwm_get(&pdev->dev, "pwm0");
+  if (IS_ERR(pwm0)) {
+    int err = PTR_ERR(pwm0);
+    if (err == -EPROBE_DEFER) {
+      LOG_WARN("PWM not ready, deferring probe");
+      unregister_chrdev_region(dev, 1);
+      return -EPROBE_DEFER;
+    }
+    LOG_ERROR("Failed to get PWM: %d", err);
+    unregister_chrdev_region(dev, 1);
+    return err;
   }
 
-  int status = gpiod_direction_output(led, 0);
-  if (status) {
-    LOG_ERROR("gpiod_direction_output: error setting pin %d to output", IO_LED);
-    return status;
-  }
+  pwm_config(pwm0, pwm_duty_cycle_ns, pwm_period_ns);
+  pwm_enable(pwm0);
 
-  gpiod_set_value(led, 0);
+  return 0;
+}
+
+int pwm_remove(struct platform_device *pdev) {
+  dev_t dev = MKDEV(major_number, 0);
+
+  LOG_DEBUG("pwm_remove");
+  pwm_disable(pwm0);
+  cdev_del(&servo_cdev);
+  unregister_chrdev_region(dev, 1);
 
   return 0;
 }
@@ -103,69 +123,119 @@ static int servo_driver_open(struct inode *inode, struct file *file_p) {
   return 0;
 }
 
-static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
-                                 size_t len, loff_t *offset) {
-  LOG_DEBUG("servo_driver_read");
-  if (*offset > 0) {
-    return 0;
-  }
-
-  int pin_value = gpiod_get_value(led);
-  if (pin_value < 0) {
-    LOG_ERROR("gpiod_get_value returned %d", pin_value);
-    return pin_value;
-  }
-
-  char pin_value_str[16];
-  int pin_value_str_len =
-      snprintf(pin_value_str, sizeof(pin_value_str), "%d\n", pin_value);
-  const size_t bytes_not_written =
-      copy_to_user(buffer, pin_value_str, pin_value_str_len);
-  LOG_DEBUG("copy_to_user returned %lu", bytes_not_written);
-
-  const size_t bytes_written = pin_value_str_len - bytes_not_written;
-  *offset += bytes_written;
-  return bytes_written;
-}
-
 static int servo_driver_release(struct inode *inode, struct file *file_p) {
   LOG_DEBUG("servo_driver_release");
   return 0;
 }
 
+static long servo_driver_ioctl(struct file *file_p, unsigned int cmd,
+                               unsigned long arg) {
+  LOG_DEBUG("servo_driver_ioctl");
+
+  switch (cmd) {
+  case SERVO_ENABLE:
+    pwm_enable(pwm0);
+    return 0;
+  case SERVO_DISABLE:
+    pwm_disable(pwm0);
+    return 0;
+  default:
+    LOG_WARN("unhandled ioctl command: %u", cmd);
+    return -EINVAL;
+  }
+}
+
+static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
+                                 size_t len, loff_t *offset) {
+  if (*offset > 0)
+    return 0;
+
+  
+
+  struct pwm_state state;
+  pwm_get_state(pwm0, &state);
+
+  int position = 0;
+  // check if enabled, if not, write -1
+  if (!state.enabled) {
+    position = -1;
+  } else {
+    position = map_value(state.duty_cycle, 500000, 2300000, 0, 180);
+  }
+
+  // map value to position
+
+  char buf[16];
+  const int len_written = snprintf(buf, sizeof(buf), "%u\n", position);
+
+  if (copy_to_user(buffer, buf, len_written))
+    return -EFAULT;
+
+  *offset += len_written;
+  return len_written;
+}
+
 static ssize_t servo_driver_write(struct file *file_p,
                                   const char __user *buffer, size_t len,
                                   loff_t *offset) {
-  LOG_DEBUG("servo_driver_write");
-  if (*offset > 0) {
-    return 0;
-  }
+  char buf[16];
 
-  char user_str[16];
-  size_t copy_len = min(len, sizeof(user_str) - 1);
-  const size_t retval = copy_from_user(user_str, buffer, copy_len);
-  if (retval != 0) {
-    LOG_ERROR("copy_from_user returned %ld", retval);
+  if (len >= sizeof(buf))
+    return -EINVAL;
+
+  if (copy_from_user(buf, buffer, len))
     return -EFAULT;
+
+  buf[len] = '\0'; // make the input a string
+
+  int val;
+  int retval = kstrtoint(buf, 10, &val);
+  if (retval) {
+    LOG_ERROR("kstrtoint (%d)", retval);
+    return -EINVAL;
   }
 
-  user_str[copy_len] = '\0';
-  *offset += copy_len;
-
-  char *newline_char_p = strchr(user_str, '\n');
-  if (newline_char_p) {
-    *newline_char_p = '\0';
+  // check range: should go in a config
+  if (val < 0 || val > 180) {
+    LOG_ERROR("servo command (%d) is out of range [%d, %d]", val, 0, 180);
+    return -EINVAL;
   }
 
-  if (strcmp(user_str, "0") == 0) {
-    LOG_DEBUG("Write: OFF");
-    gpiod_set_value(led, 0);
-  } else if (strcmp(user_str, "1") == 0) {
-    LOG_DEBUG("Write: ON");
-    gpiod_set_value(led, 1);
-  } else {
-    LOG_WARN("Unknown write command. Acceptable commands are `0` or `1`");
+  // covert to pwm
+  int pwm_duty_cycle_ns = map_value(val, 0, 180, 500000, 2300000);
+
+  // write to pwm
+  pwm_config(pwm0, pwm_duty_cycle_ns, pwm_period_ns);
+  return len;
+}
+
+int clamp_value(const int val, const int min, const int max) {
+  if (val < min) {
+    return min;
   }
 
-  return copy_len;
+  if (val > max) {
+    return max;
+  }
+
+  return val;
+}
+
+int map_value(const int val, const int in_min, const int in_max,
+              const int out_min, const int out_max) {
+  if (in_min == in_max) {
+    LOG_WARN("Input range [%d, %d] is zero width. Returning minimum value from "
+             "output range.",
+             in_min, in_max);
+    return out_min;
+  }
+
+  int clamped_val = clamp_value(val, in_min, in_max);
+  if (clamped_val != val) {
+    LOG_WARN("Mapped value (%d) was clamped to range [%d, %d].", val, in_min,
+             in_max);
+  }
+
+  return (clamped_val - in_min) * (out_max - out_min) / (in_max - in_min) +
+         out_min;
 }
