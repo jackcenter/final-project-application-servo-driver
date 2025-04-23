@@ -7,6 +7,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "servo.h"
 #include "servo_ioctl.h"
 
 int main() {
@@ -16,13 +17,13 @@ int main() {
   newt.c_lflag &= ~(ICANON | ECHO);
   tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 
-  int fd = open("/dev/servo_driver", O_WRONLY);
-  if (fd < 0) {
-    perror("Failed to open /dev/servo_driver");
+  Servo servo = servo_create("/dev/servo_driver");
+  if (!servo_init(&servo)) {
+    printf("Error: failed to open servo: %s\r\n", servo.handle);
     return 1;
   }
 
-  printf("Listening for arrow keys and WASD (press 'q' to quit)...\n");
+  printf("Listening for arrow keys and WASD (press 'q' to quit)...\r\n");
 
   while (1) {
     fd_set set;
@@ -42,33 +43,27 @@ int main() {
             switch (seq[2]) {
             case 'A':
               printf("Up Arrow (pressed)\n");
-              if (ioctl(fd, SERVO_ENABLE) < 0) {
-                perror("ioctl");
+              if (!servo_enable(&servo)) {
+                printf("Error: failed to enable servo: %s\r\n", servo.handle);
               }
               break;
             case 'B':
               printf("Down Arrow (pressed)\n");
-              if (ioctl(fd, SERVO_DISABLE) < 0) {
-                perror("ioctl");
+              if (!servo_disable(&servo)) {
+                printf("Error: failed to disable servo: %s\r\n", servo.handle);
               }
               break;
             case 'C': {
               printf("Right Arrow (pressed)\n");
-              const char *data = "0"; // e.g., 75% duty cycle
-              if (write(fd, data, strlen(data)) < 0) {
-                perror("Failed to write to servo driver");
-                close(fd);
-                return 1;
+              if (!servo_set_position(0, &servo)) {
+                printf("Error: failed to set poistion on servo: %s\r\n", servo.handle);
               }
               break;
             }
             case 'D': {
               printf("Left Arrow (pressed)\n");
-              const char *data = "180"; // e.g., 75% duty cycle
-              if (write(fd, data, strlen(data)) < 0) {
-                perror("Failed to write to servo driver");
-                close(fd);
-                return 1;
+              if (!servo_set_position(180, &servo)) {
+                printf("Error: failed to set poistion on servo: %s\r\n", servo.handle);
               }
               break;
             }
