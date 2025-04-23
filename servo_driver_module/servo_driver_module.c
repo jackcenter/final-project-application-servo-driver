@@ -93,9 +93,11 @@ int pwm_probe(struct platform_device *pdev) {
     int err = PTR_ERR(pwm0);
     if (err == -EPROBE_DEFER) {
       LOG_WARN("PWM not ready, deferring probe");
+      unregister_chrdev_region(dev, 1);
       return -EPROBE_DEFER;
     }
     LOG_ERROR("Failed to get PWM: %d", err);
+    unregister_chrdev_region(dev, 1);
     return err;
   }
 
