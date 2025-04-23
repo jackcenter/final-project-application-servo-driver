@@ -145,13 +145,27 @@ static long servo_driver_ioctl(struct file *file_p, unsigned int cmd,
 
 static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
                                  size_t len, loff_t *offset) {
-  char buf[16];
-  int len_written;
-
   if (*offset > 0)
     return 0;
 
-  len_written = snprintf(buf, sizeof(buf), "%u\n", pwm_duty_cycle_ns);
+  
+
+  struct pwm_state state;
+  pwm_get_state(pwm0, &state);
+
+  int position = 0;
+  // check if enabled, if not, write -1
+  if (!state.enabled) {
+    position = -1;
+  } else {
+    position = map_value(state.duty_cycle, 500000, 2300000, 0, 180);
+  }
+
+  // map value to position
+
+  char buf[16];
+  const int len_written = snprintf(buf, sizeof(buf), "%u\n", position);
+
   if (copy_to_user(buffer, buf, len_written))
     return -EFAULT;
 
@@ -186,7 +200,7 @@ static ssize_t servo_driver_write(struct file *file_p,
   }
 
   // covert to pwm
-  int pwm_duty_cycle_ns = map_value(val, 0, 180, 470000, 2300000);
+  int pwm_duty_cycle_ns = map_value(val, 0, 180, 500000, 2300000);
 
   // write to pwm
   pwm_config(pwm0, pwm_duty_cycle_ns, pwm_period_ns);
