@@ -8,6 +8,7 @@
 #include <linux/uaccess.h>
 
 #include "log.h"
+#include "servo_ioctl.h"
 
 MODULE_AUTHOR("Jack Center");
 MODULE_LICENSE("Dual BSD/GPL");
@@ -25,6 +26,8 @@ static u32 pwm_duty_cycle_ns = 1500000;
 
 static int pwm_probe(struct platform_device *pdev);
 static int pwm_remove(struct platform_device *pdev);
+static long servo_driver_ioctl(struct file *file_p, unsigned int cmd,
+                               unsigned long arg);
 static int servo_driver_open(struct inode *inode, struct file *file_p);
 static int servo_driver_release(struct inode *inode, struct file *file_p);
 static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
@@ -58,6 +61,7 @@ static const struct file_operations servo_driver_fops = {
     .read = servo_driver_read,
     .release = servo_driver_release,
     .write = servo_driver_write,
+    .unlocked_ioctl = servo_driver_ioctl,
 };
 
 module_platform_driver(pwm_driver); // Handles init and exit
@@ -120,6 +124,23 @@ static int servo_driver_open(struct inode *inode, struct file *file_p) {
 static int servo_driver_release(struct inode *inode, struct file *file_p) {
   LOG_DEBUG("servo_driver_release");
   return 0;
+}
+
+static long servo_driver_ioctl(struct file *file_p, unsigned int cmd,
+                               unsigned long arg) {
+  LOG_DEBUG("servo_driver_ioctl");
+
+  switch (cmd) {
+  case SERVO_ENABLE:
+    pwm_enable(pwm0);
+    return 0;
+  case SERVO_DISABLE:
+    pwm_disable(pwm0);
+    return 0;
+  default:
+    LOG_WARN("unhandled ioctl command: %u", cmd);
+    return -EINVAL;
+  }
 }
 
 static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
