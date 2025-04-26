@@ -93,11 +93,11 @@ int pwm_probe(struct platform_device *pdev) {
   if (IS_ERR(pwm0)) {
     int err = PTR_ERR(pwm0);
     if (err == -EPROBE_DEFER) {
-      LOG_WARN("PWM not ready, deferring probe");
+      LOG_WARN("PWM not ready, deferring probe 0");
       unregister_chrdev_region(dev, 2);
       return -EPROBE_DEFER;
     }
-    LOG_ERROR("Failed to get PWM: %d", err);
+    LOG_ERROR("Failed to get PWM 0: %d", err);
     unregister_chrdev_region(dev, 2);
     return err;
   }
@@ -106,11 +106,11 @@ int pwm_probe(struct platform_device *pdev) {
   if (IS_ERR(pwm1)) {
     int err = PTR_ERR(pwm1);
     if (err == -EPROBE_DEFER) {
-      LOG_WARN("PWM not ready, deferring probe");
+      LOG_WARN("PWM not ready, deferring probe 1");
       unregister_chrdev_region(dev, 2);
       return -EPROBE_DEFER;
     }
-    LOG_ERROR("Failed to get PWM: %d", err);
+    LOG_ERROR("Failed to get PWM 1: %d", err);
     unregister_chrdev_region(dev, 2);
     return err;
   }
