@@ -40,41 +40,37 @@ int main() {
 
     char seq[3];
     if (read(STDIN_FILENO, &seq[0], 1) == 1) {
-      if (seq[0] == 'q' || seq[0] == 'Q')
-        break;
+      if (seq[0] == 'q' || seq[0] == 'Q') {
+        if (!servo_disable(&servo_0)) {
+          printf("Error: failed to disable servo: %s\r\n", servo_0.handle);
+        }
 
+        if (!servo_disable(&servo_1)) {
+          printf("Error: failed to disable servo: %s\r\n", servo_1.handle);
+        }
+        break;
+      }
+      
       if (seq[0] == '\x1b') { // Escape sequence for arrows
         if (read(STDIN_FILENO, &seq[1], 1) == 1 && seq[1] == '[') {
           if (read(STDIN_FILENO, &seq[2], 1) == 1) {
             switch (seq[2]) {
             case 'A':
               printf("Up Arrow (pressed)\n");
-              if (!servo_enable(&servo_0)) {
-                printf("Error: failed to enable servo: %s\r\n", servo_0.handle);
-              }
-
-              if (!servo_enable(&servo_1)) {
-                printf("Error: failed to enable servo: %s\r\n", servo_1.handle);
+              if (!servo_set_position(180, &servo_1)) {
+                printf("Error: failed to set poistion on servo: %s\r\n", servo_1.handle);
               }
               break;
             case 'B':
               printf("Down Arrow (pressed)\n");
-              if (!servo_disable(&servo_0)) {
-                printf("Error: failed to disable servo: %s\r\n", servo_0.handle);
-              }
-
-              if (!servo_disable(&servo_1)) {
-                printf("Error: failed to disable servo: %s\r\n", servo_1.handle);
+              if (!servo_set_position(0, &servo_1)) {
+                printf("Error: failed to set poistion on servo: %s\r\n", servo_1.handle);
               }
               break;
             case 'C': {
               printf("Right Arrow (pressed)\n");
               if (!servo_set_position(0, &servo_0)) {
                 printf("Error: failed to set poistion on servo: %s\r\n", servo_0.handle);
-              }
-
-              if (!servo_set_position(0, &servo_1)) {
-                printf("Error: failed to set poistion on servo: %s\r\n", servo_1.handle);
               }
               break;
             }
@@ -83,10 +79,6 @@ int main() {
               if (!servo_set_position(180, &servo_0)) {
                 printf("Error: failed to set poistion on servo: %s\r\n", servo_0.handle);
               }
-
-              if (!servo_set_position(180, &servo_1)) {
-                printf("Error: failed to set poistion on servo: %s\r\n", servo_1.handle);
-              }
               break;
             }
             }
@@ -94,6 +86,26 @@ int main() {
         }
       } else {
         switch (tolower(seq[0])) {
+        case 'i':
+          printf("i / Enable (pressed)\n");
+          if (!servo_enable(&servo_0)) {
+            printf("Error: failed to enable servo: %s\r\n", servo_0.handle);
+          }
+
+          if (!servo_enable(&servo_1)) {
+            printf("Error: failed to enable servo: %s\r\n", servo_1.handle);
+          }
+          break;
+        case 'o':
+          printf("o / Disable (pressed)\n");
+          if (!servo_disable(&servo_0)) {
+            printf("Error: failed to disable servo: %s\r\n", servo_0.handle);
+          }
+
+          if (!servo_disable(&servo_1)) {
+            printf("Error: failed to disable servo: %s\r\n", servo_1.handle);
+          }
+          break;
         case 'w':
           printf("W / Up (pressed)\n");
           break;
