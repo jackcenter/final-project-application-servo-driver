@@ -125,9 +125,19 @@ int pwm_probe(struct platform_device *pdev) {
 int pwm_remove(struct platform_device *pdev) {
   LOG_DEBUG("pwm_remove");
   ServoDevice *servo_device = platform_get_drvdata(pdev);
+  if (!servo_device) {
+    pr_err("servo_driver: pwm_remove called with NULL drvdata\n");
+    return -EINVAL;
+}
 
-  pwm_disable(servo_device->pwm[0]);
-  pwm_disable(servo_device->pwm[1]);
+  if (servo_device->pwm[0]) {
+    pwm_disable(servo_device->pwm[0]);
+  }
+  
+  if (servo_device->pwm[1]) {
+    pwm_disable(servo_device->pwm[1]);
+  }
+  
   cdev_del(&servo_device->cdev);
   unregister_chrdev_region(servo_device->device_number, DEVICE_CNT);
 
