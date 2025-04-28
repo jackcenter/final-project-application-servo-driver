@@ -20,6 +20,7 @@ static int major_number;
 static struct cdev servo_cdev;
 
 static struct pwm_device *pwm0;
+static struct pwm_device *pwm1;
 
 static u32 pwm_period_ns = 20000000;
 static u32 pwm_duty_cycle_ns = 1500000;
@@ -72,7 +73,7 @@ int pwm_probe(struct platform_device *pdev) {
 
   LOG_DEBUG("pwm_probe");
 
-  result = alloc_chrdev_region(&dev, 0, 1, DEVICE_NAME);
+  result = alloc_chrdev_region(&dev, 0, 2, DEVICE_NAME);
   if (result < 0) {
     LOG_ERROR("Failed to allocate char device region");
     return result;
@@ -81,10 +82,10 @@ int pwm_probe(struct platform_device *pdev) {
   major_number = MAJOR(dev);
 
   cdev_init(&servo_cdev, &servo_driver_fops);
-  result = cdev_add(&servo_cdev, dev, 1);
+  result = cdev_add(&servo_cdev, dev, 2);
   if (result < 0) {
     LOG_ERROR("Failed to add cdev");
-    unregister_chrdev_region(dev, 1);
+    unregister_chrdev_region(dev, 2);
     return result;
   }
 
@@ -92,16 +93,30 @@ int pwm_probe(struct platform_device *pdev) {
   if (IS_ERR(pwm0)) {
     int err = PTR_ERR(pwm0);
     if (err == -EPROBE_DEFER) {
-      LOG_WARN("PWM not ready, deferring probe");
-      unregister_chrdev_region(dev, 1);
+      LOG_WARN("PWM not ready, deferring probe 0");
+      unregister_chrdev_region(dev, 2);
       return -EPROBE_DEFER;
     }
-    LOG_ERROR("Failed to get PWM: %d", err);
-    unregister_chrdev_region(dev, 1);
+    LOG_ERROR("Failed to get PWM 0: %d", err);
+    unregister_chrdev_region(dev, 2);
+    return err;
+  }
+
+  pwm1 = devm_pwm_get(&pdev->dev, "pwm1");
+  if (IS_ERR(pwm1)) {
+    int err = PTR_ERR(pwm1);
+    if (err == -EPROBE_DEFER) {
+      LOG_WARN("PWM not ready, deferring probe 1");
+      unregister_chrdev_region(dev, 2);
+      return -EPROBE_DEFER;
+    }
+    LOG_ERROR("Failed to get PWM 1: %d", err);
+    unregister_chrdev_region(dev, 2);
     return err;
   }
 
   pwm_config(pwm0, pwm_duty_cycle_ns, pwm_period_ns);
+  pwm_config(pwm1, pwm_duty_cycle_ns, pwm_period_ns);
 
   return 0;
 }
@@ -111,8 +126,9 @@ int pwm_remove(struct platform_device *pdev) {
 
   LOG_DEBUG("pwm_remove");
   pwm_disable(pwm0);
+  pwm_disable(pwm1);
   cdev_del(&servo_cdev);
-  unregister_chrdev_region(dev, 1);
+  unregister_chrdev_region(dev, 2);
 
   return 0;
 }
@@ -134,9 +150,11 @@ static long servo_driver_ioctl(struct file *file_p, unsigned int cmd,
   switch (cmd) {
   case SERVO_ENABLE:
     pwm_enable(pwm0);
+    pwm_enable(pwm1);
     return 0;
   case SERVO_DISABLE:
     pwm_disable(pwm0);
+    pwm_disable(pwm1);
     return 0;
   default:
     LOG_WARN("unhandled ioctl command: %u", cmd);
@@ -205,6 +223,7 @@ static ssize_t servo_driver_write(struct file *file_p,
 
   // write to pwm
   pwm_config(pwm0, pwm_duty_cycle_ns, pwm_period_ns);
+  pwm_config(pwm1, pwm_duty_cycle_ns, pwm_period_ns);
   return len;
 }
 
