@@ -17,8 +17,8 @@ int main() {
   newt.c_lflag &= ~(ICANON | ECHO);
   tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 
-  Servo servo_0 = servo_create("/dev/servo_driver");
-  Servo servo_1 = servo_create("/dev/servo1");
+  Servo servo_0 = servo_create("/dev/servo_driver_0");
+  Servo servo_1 = servo_create("/dev/servo_driver_1");
   if (!servo_init(&servo_0)) {
     printf("Error: failed to open servo: %s\r\n", servo_0.handle);
     return 1;
