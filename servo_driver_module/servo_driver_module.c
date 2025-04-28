@@ -204,7 +204,6 @@ static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
 
   char buf[16] = {0}; // Space for 32 bit int
   int len_written = snprintf(buf, sizeof(buf), "%d\n", position);
-  LOG_DEBUG("String: %s", buf);
 
   if (len_written < 0)
     return -EFAULT;
