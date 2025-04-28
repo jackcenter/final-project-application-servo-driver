@@ -150,9 +150,11 @@ static long servo_driver_ioctl(struct file *file_p, unsigned int cmd,
   switch (cmd) {
   case SERVO_ENABLE:
     pwm_enable(pwm0);
+    pwm_enable(pwm1);
     return 0;
   case SERVO_DISABLE:
     pwm_disable(pwm0);
+    pwm_disable(pwm1);
     return 0;
   default:
     LOG_WARN("unhandled ioctl command: %u", cmd);
@@ -221,6 +223,7 @@ static ssize_t servo_driver_write(struct file *file_p,
 
   // write to pwm
   pwm_config(pwm0, pwm_duty_cycle_ns, pwm_period_ns);
+  pwm_config(pwm1, pwm_duty_cycle_ns, pwm_period_ns);
   return len;
 }
 
