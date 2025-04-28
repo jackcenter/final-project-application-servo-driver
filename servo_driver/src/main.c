@@ -50,34 +50,72 @@ int main() {
         }
         break;
       }
-      
+
       if (seq[0] == '\x1b') { // Escape sequence for arrows
         if (read(STDIN_FILENO, &seq[1], 1) == 1 && seq[1] == '[') {
           if (read(STDIN_FILENO, &seq[2], 1) == 1) {
             switch (seq[2]) {
-            case 'A':
+            case 'A': {
               printf("Up Arrow (pressed)\n");
-              if (!servo_set_position(180, &servo_1)) {
-                printf("Error: failed to set poistion on servo: %s\r\n", servo_1.handle);
+              const int current_position_deg = servo_get_position(&servo_1);
+              if (current_position_deg < 0) {
+                printf("Error: failed to get poistion on servo: %s\r\n",
+                       servo_1.handle);
+                break;
+              }
+
+              const int new_postion_deg = current_position_deg + 5;
+              if (!servo_set_position(new_postion_deg, &servo_1)) {
+                printf("Error: failed to set poistion on servo: %s\r\n",
+                       servo_1.handle);
               }
               break;
-            case 'B':
+            }
+            case 'B': {
               printf("Down Arrow (pressed)\n");
-              if (!servo_set_position(0, &servo_1)) {
-                printf("Error: failed to set poistion on servo: %s\r\n", servo_1.handle);
+              const int current_position_deg = servo_get_position(&servo_1);
+              if (current_position_deg < 0) {
+                printf("Error: failed to get poistion on servo: %s\r\n",
+                       servo_1.handle);
+                break;
+              }
+
+              const int new_postion_deg = current_position_deg - 5;
+              if (!servo_set_position(new_postion_deg, &servo_1)) {
+                printf("Error: failed to set poistion on servo: %s\r\n",
+                       servo_1.handle);
               }
               break;
+            }
             case 'C': {
               printf("Right Arrow (pressed)\n");
-              if (!servo_set_position(0, &servo_0)) {
-                printf("Error: failed to set poistion on servo: %s\r\n", servo_0.handle);
+              const int current_position_deg = servo_get_position(&servo_0);
+              if (current_position_deg < 0) {
+                printf("Error: failed to get poistion on servo: %s\r\n",
+                       servo_0.handle);
+                break;
+              }
+
+              const int new_postion_deg = current_position_deg + 5;
+              if (!servo_set_position(new_postion_deg, &servo_0)) {
+                printf("Error: failed to set poistion on servo: %s\r\n",
+                       servo_0.handle);
               }
               break;
             }
             case 'D': {
               printf("Left Arrow (pressed)\n");
-              if (!servo_set_position(180, &servo_0)) {
-                printf("Error: failed to set poistion on servo: %s\r\n", servo_0.handle);
+              const int current_position_deg = servo_get_position(&servo_0);
+              if (current_position_deg < 0) {
+                printf("Error: failed to get poistion on servo: %s\r\n",
+                       servo_0.handle);
+                break;
+              }
+
+              const int new_postion_deg = current_position_deg - 5;
+              if (!servo_set_position(new_postion_deg, &servo_0)) {
+                printf("Error: failed to set poistion on servo: %s\r\n",
+                       servo_0.handle);
               }
               break;
             }
@@ -108,15 +146,31 @@ int main() {
           break;
         case 'w':
           printf("W / Up (pressed)\n");
+          if (!servo_set_position(180, &servo_1)) {
+            printf("Error: failed to set poistion on servo: %s\r\n",
+                   servo_1.handle);
+          }
           break;
         case 'a':
           printf("A / Left (pressed)\n");
+          if (!servo_set_position(0, &servo_0)) {
+            printf("Error: failed to set poistion on servo: %s\r\n",
+                   servo_0.handle);
+          }
           break;
         case 's':
           printf("S / Down (pressed)\n");
+          if (!servo_set_position(0, &servo_1)) {
+            printf("Error: failed to set poistion on servo: %s\r\n",
+                   servo_1.handle);
+          }
           break;
         case 'd':
           printf("D / Right (pressed)\n");
+          if (!servo_set_position(180, &servo_0)) {
+            printf("Error: failed to set poistion on servo: %s\r\n",
+                   servo_0.handle);
+          }
           break;
         default:
           printf("Pressed: %c\n", seq[0]);

@@ -74,8 +74,8 @@ int pwm_probe(struct platform_device *pdev) {
 
   servo_device->device = &pdev->dev;
 
-  int result =
-      alloc_chrdev_region(&servo_device->device_number, 0, DEVICE_CNT, DEVICE_NAME);
+  int result = alloc_chrdev_region(&servo_device->device_number, 0, DEVICE_CNT,
+                                   DEVICE_NAME);
   if (result < 0) {
     LOG_ERROR("alloc_chrdev_region");
     return result;
@@ -84,7 +84,8 @@ int pwm_probe(struct platform_device *pdev) {
   cdev_init(&servo_device->cdev, &servo_driver_fops);
   servo_device->cdev.owner = THIS_MODULE;
 
-  result = cdev_add(&servo_device->cdev, servo_device->device_number, DEVICE_CNT);
+  result =
+      cdev_add(&servo_device->cdev, servo_device->device_number, DEVICE_CNT);
   if (result < 0) {
     LOG_ERROR("cdev_add");
     unregister_chrdev_region(servo_device->device_number, DEVICE_CNT);
@@ -130,16 +131,16 @@ int pwm_remove(struct platform_device *pdev) {
   if (!servo_device) {
     pr_err("servo_driver: pwm_remove called with NULL drvdata\n");
     return -EINVAL;
-}
+  }
 
   if (servo_device->pwm[0]) {
     pwm_disable(servo_device->pwm[0]);
   }
-  
+
   if (servo_device->pwm[1]) {
     pwm_disable(servo_device->pwm[1]);
   }
-  
+
   cdev_del(&servo_device->cdev);
   unregister_chrdev_region(servo_device->device_number, DEVICE_CNT);
 
@@ -154,7 +155,7 @@ static int servo_driver_open(struct inode *inode, struct file *file_p) {
 
   file_p->private_data = servo_device;
   file_p->f_inode->i_private = (void *)(uintptr_t)minor;
-  
+
   return 0;
 }
 
@@ -185,15 +186,14 @@ static long servo_driver_ioctl(struct file *file_p, unsigned int cmd,
 
 static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
                                  size_t len, loff_t *offset) {
-  if (*offset > 0)
-    return 0;
+  LOG_DEBUG("servo_driver_read");
 
   ServoDevice *servo_device = file_p->private_data;
   unsigned int minor = iminor(file_p->f_inode);
 
   struct pwm_state state;
   pwm_get_state(servo_device->pwm[minor], &state);
-  
+
   int position = 0;
   // check if enabled, if not, write -1
   if (!state.enabled) {
@@ -202,23 +202,30 @@ static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
     position = map_value(state.duty_cycle, 500000, 2300000, 0, 180);
   }
 
-  char buf[16];  // Space for 32 bit int
-  const int len_written = snprintf(buf, sizeof(buf), "%u\n", position);
+  char buf[16] = {0}; // Space for 32 bit int
+  int len_written = snprintf(buf, sizeof(buf), "%d\n", position);
+
+  if (len_written < 0)
+    return -EFAULT;
+
+  // Only copy as much as user space can take
+  if (len_written > len)
+    len_written = len;
 
   if (copy_to_user(buffer, buf, len_written))
     return -EFAULT;
 
-  *offset += len_written;
   return len_written;
 }
 
 static ssize_t servo_driver_write(struct file *file_p,
                                   const char __user *buffer, size_t len,
                                   loff_t *offset) {
+  LOG_DEBUG("servo_driver_write");
   ServoDevice *servo_device = file_p->private_data;
   unsigned int minor = iminor(file_p->f_inode);
 
-  char buf[16];  // Space for 32 bit int
+  char buf[16]; // Space for 32 bit int
   if (len >= sizeof(buf)) {
     return -EINVAL;
   }
