@@ -119,6 +119,8 @@ int pwm_probe(struct platform_device *pdev) {
   }
   pwm_config(servo_device->pwm[1], pwm_duty_cycle_ns, pwm_period_ns);
 
+  platform_set_drvdata(pdev, servo_device);
+
   return 0;
 }
 
