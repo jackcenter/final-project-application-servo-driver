@@ -84,6 +84,7 @@ int servo_get_position(const Servo *const servo) {
     perror("read");
     return -1;
   }
+  printf("Read %zd bytes: '%s'\n", bytes_read, data);
 
   data[bytes_read] = '\0';
   int pos = -1;
