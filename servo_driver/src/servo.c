@@ -100,7 +100,7 @@ bool servo_init(Servo *const servo) {
     return false;
   }
 
-  servo->fd = open(servo->handle, O_WRONLY);
+  servo->fd = open(servo->handle, O_RDWR);
   if (servo->fd < 0) {
     perror("open");
     return false;
