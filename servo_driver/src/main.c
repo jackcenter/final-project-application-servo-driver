@@ -95,6 +95,7 @@ int main() {
           if (!servo_enable(&servo_1)) {
             printf("Error: failed to enable servo: %s\r\n", servo_1.handle);
           }
+          break;
         case 'o':
           printf("o / Disable (pressed)\n");
           if (!servo_disable(&servo_0)) {
@@ -104,6 +105,7 @@ int main() {
           if (!servo_disable(&servo_1)) {
             printf("Error: failed to disable servo: %s\r\n", servo_1.handle);
           }
+          break;
         case 'w':
           printf("W / Up (pressed)\n");
           break;
