@@ -203,7 +203,7 @@ static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
   }
 
   char buf[16];  // Space for 32 bit int
-  const int len_written = snprintf(buf, sizeof(buf), "%d\n", position);
+  int len_written = snprintf(buf, sizeof(buf), "%d\n", position);
 
   if (len_written < 0)
     return -EFAULT;
@@ -211,7 +211,7 @@ static ssize_t servo_driver_read(struct file *file_p, char __user *buffer,
   // Only copy as much as user space can take
   if (len_written > len)
     len_written = len;
-    
+
   if (copy_to_user(buffer, buf, len_written))
     return -EFAULT;
 
